@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Update firmware</title>
+    <style type="text/css">
+        body {
+            color: #505050;
+            font-family: sahel, Sahel-FD, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: 16px;
+            line-height: 24px;
+            font-weight: 300;
+        }
+
+       .button {
+            background-color: #319fe9;
+            border: none;
+            color: white;
+            padding: 12px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            border-radius: 5px;
+        }
+
+        .button:active {
+            border-width: 0;
+            outline: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <center>
+        <div style="padding-top: 24px;">
+            <h1>Update firmware</h1>
+            <hr>
+            <form method='POST' action='' enctype='multipart/form-data'>
+                <div style="text-align: left;">
+                    <strong>Firmware:</strong>
+                </div>
+                <input type='file' accept='.bin,.bin.gz' name='firmware'>
+                <br><br>
+                <input class="button" type='submit' value='Update Firmware'>
+            </form>
+            <hr>
+            <form  method='POST' action='' enctype='multipart/form-data'>
+                <div style="text-align: left;">
+                    <strong>FileSystem:</strong>
+                </div>
+                <input type='file' accept='.bin,.bin.gz' name='filesystem'>
+                <br><br>
+                <input class="button" type='submit' value='Update FileSystem'>
+            </form>
+            <hr>
+        </div>
+    </center>
+</body>
+
+</html>

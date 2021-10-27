@@ -1,0 +1,523 @@
+#ifndef UNIT_TEST
+#include <Arduino.h>
+#endif
+
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+#include <ESP8266WebServer.h>
+#include <ESP8266HTTPClient.h>
+#include <ESP8266HTTPUpdateServer.h>
+
+#include "Diseqc.h"
+#include "Positioner.h"
+#include "index.h"
+#include "login.h"
+
+#include <EEPROM.h>
+//#include <FS.h> // Include the SPIFFS library
+
+String getContentType(String filename); // convert the file extension to the MIME type
+bool handleFileRead(String path);       // send the right file to the client (if it exists)
+
+#define AccessPoint
+
+//WIFI
+
+const char *ws_username = "admin";
+const char *ws_password = "admin";
+// allows you to set the realm of authentication Default:"Login Required"
+const char *www_realm = "Login Required";
+//_srealm = String(F("Login Required"));
+bool allow = false;
+
+#ifndef AccessPoint
+const char *ssid = "techforall.ir";
+const char *password = "WYM9&&^U'N@RMa,";
+#else
+#define APSSID "Positioner" //SSID
+#define APPSK "12345678"    //Password
+/* Set these to your desired credentials. */
+const char *ssid = APSSID;
+const char *ssid_password = APPSK;
+#endif
+
+ESP8266HTTPUpdateServer httpUpdater;
+ESP8266WebServer server(80);
+
+//DISEQC AND POSITIONER
+
+uint16_t RECV_PIN = D2;   //GPIO4
+uint16_t SENSOR_PIN = D1; //GPIO5
+uint16_t EAST_PIN = D3;   //GPIO0
+uint16_t WEST_PIN = D4;   //GPIO2
+
+String Poslog = {""};
+
+uint8_t logCount = 20;
+
+enum Error PositionerError = Error::none;
+
+decode_results results;
+
+Diseqc diseqc(RECV_PIN, 1024, kTimeoutMs);
+Positioner positioner(SENSOR_PIN, EAST_PIN, WEST_PIN);
+
+//Function's
+
+void login();
+
+bool is_authenticated();
+
+void MOV()
+{
+  String state = server.arg("CMD");
+  if (state == "1")
+  {
+    positioner.MoveToEast();
+    state = "EAST";
+  }
+  else if (state == "2")
+  {
+    positioner.MoveToWest();
+    state = "WEST";
+  }
+  else if (state == "0")
+  {
+    positioner.StopMovement();
+    state = "HALT";
+  }
+
+  server.send(200, "text/plane", state);
+}
+
+void GET_STATUS()
+{
+  uint8_t state = positioner.GetPosState();
+  //read from eeprom
+  uint16_t cnt = positioner.GetStatus();
+  uint8_t currentSAT = positioner.GetCurrentSat();
+  uint16_t westLimit = positioner.GetWestLimit();
+  uint16_t EastLimit = positioner.GetEastLimit();
+  uint8_t limit = positioner.GetLimit();
+
+  String sensor_value = String(cnt);
+
+  sensor_value += "`" + Poslog + "`" + currentSAT + "`" + westLimit + "`" + EastLimit +
+                  "`" + limit + "`" + PositionerError + "`" + state;
+
+  server.send(200, "text/plane", sensor_value);
+  Poslog = "0";
+}
+
+void handleRoot()
+{
+  String s = FPSTR(webpage);
+  /*String username = server.arg("username");
+  String password = server.arg("password");*/
+
+  /*if (username == "admin" && password == "admin")
+    allow = true;
+
+  if (allow)
+    server.send(200, "text/html", s);
+  else
+    login();
+  if (!is_authenticated())
+  {
+    server.sendHeader("Location", "/login");
+    server.sendHeader("Cache-Control", "no-cache");
+    server.send(301);
+    return;
+  }*/
+
+  server.send(200, "text/html", s);
+}
+
+void handleNotFound()
+{
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i = 0; i < server.args(); i++)
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  server.send(404, "text/plain", message);
+}
+
+//Check if header is present and correct
+bool is_authenticated()
+{
+  Serial.println("Enter is_authenticated");
+  if (server.hasHeader("Cookie"))
+  {
+    Serial.print("Found cookie: ");
+    String cookie = server.header("Cookie");
+    Serial.println(cookie);
+    if (cookie.indexOf("POSSESSIONID=1") != -1)
+    {
+      Serial.println("Authentication Successful");
+      return true;
+    }
+  }
+  Serial.println("Authentication Failed");
+  return false;
+}
+
+String _getRandomHexString()
+{
+  char buffer[33]; // buffer to hold 32 Hex Digit + /0
+  int i;
+  for (i = 0; i < 4; i++)
+  {
+    sprintf(buffer + (i * 8), "%08x", RANDOM_REG32);
+  }
+  return String(buffer);
+}
+
+static const char WWW_Authenticate[] PROGMEM = "WWW-Authenticate";
+String __snonce; // Store noance and opaque for future comparison
+String __sopaque;
+String __srealm = String("Login Required"); // Store the Auth realm between Calls
+void login()
+{
+  String s = FPSTR(loginpage);
+
+  /*
+  if (server.hasHeader("Cookie"))
+  {
+    Serial.print("Found cookie: ");
+    String cookie = server.header("Cookie");
+    Serial.println(cookie);
+  }
+
+  if (server.hasArg("DISCONNECT"))
+  {
+    Serial.println("Disconnection");
+    server.sendHeader("Location", "/login");
+    server.sendHeader("Cache-Control", "no-cache");
+    server.sendHeader("Set-Cookie", "POSSESSIONID=0");
+    server.send(301);
+    return;
+  }
+  
+  if (server.hasArg("username") && server.hasArg("password"))
+  {
+    if (server.arg("username") == "admin" && server.arg("password") == "admin")
+    {
+      server.sendHeader("Location", "/");
+      server.sendHeader("Cache-Control", "no-cache");
+      server.sendHeader("Set-Cookie", "POSSESSIONID=1");
+      server.send(301);
+      Serial.println("Log in Successful");
+      return;
+    }
+    Serial.println("Log in Failed");
+  }
+  */
+
+  /*EXAMPLE :
+
+Authorization: Digest 
+ username="admin" 
+ Realm="abcxyz" 
+ nonce="474754847743646", 
+ uri="/uri" 
+ response="7cffhfr54685gnnfgerg8"
+
+Authorization: Digest 
+    username="user1",
+    realm="Custom Realm Name",
+    nonce="MTM3NTYwOTA5NjU3OTo5YmIyMjgwNTFlMjdhMTA1MWM3OTMyMWYyNDY2MGFlZA==",
+    uri="/spring-security-rest-digest-auth/api/foos/1", 
+    ....
+
+Authorization: Basic AXVubzpwQDU1dzByYM==
+*/
+
+  /*if (server.hasHeader(FPSTR(AUTHORIZATION_HEADER)))
+  {
+    String _realm    = _extractParam(authReq, F("realm=\""));
+      String _H1 = credentialHash((String)username,_realm,(String)password);
+      return authenticateDigest((String)username,_H1);
+  }*/
+
+  /*__snonce=_getRandomHexString();
+   __sopaque=_getRandomHexString();
+   server.sendHeader(String(FPSTR(WWW_Authenticate)), String(F("Digest realm=\"")) 
+    +__srealm + String(F("\", qop=\"auth\", nonce=\"")) 
+    + __snonce + String(F("\", opaque=\"")) + __sopaque + String('\"'));*/
+
+  /*server.sendHeader(String(FPSTR(WWW_Authenticate)), 
+                          String(F("Basic realm=\"")) + __srealm + String('\"'));*/
+
+  //server.send(401, String("html"), String("authFailMsg"));
+
+  //server.send(200, "text/html", s);
+  //server.streamFile()
+}
+
+void files()
+{
+}
+
+void setup(void)
+{
+  //Turn off WiFi
+  //WiFi.mode(WIFI_OFF);    //This also works
+  //WiFi.forceSleepBegin(); //This also works
+
+  //WiFi.mode(WIFI_AP);   //To Turn on WiFi in Specific Mode like WIFI_STA or WIFI_AP
+  httpUpdater.setup(&server, "/update", ws_username, ws_password);
+
+  diseqc.begin();
+
+  //SPIFFS.begin(); // Start the SPI Flash Files System
+
+  Serial.begin(9600);
+  Serial.println("");
+  delay(500);
+
+#ifndef AccessPoint
+  WiFi.begin(ssid, password);
+  // Wait for connection
+  Serial.printf("Connecting to %s ", ssid);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+#else
+  Serial.print("Configuring access point...");
+  WiFi.softAP(ssid, ssid_password, 8);
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("AccessPoint IP address: ");
+  Serial.println(myIP);
+#endif
+
+  server.on("/", []
+            {
+              if (!server.authenticate(ws_username, ws_password))
+                server.requestAuthentication(DIGEST_AUTH);
+              handleRoot();
+            });
+  server.on("/MOV", MOV);
+  server.on("/GET_STATUS", GET_STATUS);
+  server.on("/login", login);
+  server.on("/files", files);
+  server.onNotFound(handleNotFound);
+
+  /*server.onNotFound([]() {                              // If the client requests any URI
+    if (!handleFileRead(server.uri()))                  // send it if it exists
+      server.send(404, "text/plain", "404: Not Found"); // otherwise, respond with a 404 (Not Found)
+  });*/
+
+  server.begin();
+  Serial.println("HTTP server started");
+
+  /*positioner.StoreSatellite(1, 33737);
+  positioner.StoreSatellite(2, 33657);*/
+}
+
+void loop(void)
+{
+
+  if (positioner.GetPosState() != haltState)
+  {
+    /******************/
+    mycounter();
+    /******************/
+    //error check
+    if (positioner.CheckMotorTimout())
+    {
+      PositionerError = Error::SensorConnectorORHardwareLimit;
+    }
+    else
+    {
+      PositionerError = Error::none;
+    }
+  }
+
+  server.handleClient();
+
+  //store current SRAM status in eeprom if not match.
+  if (positioner.GetStatusFromSRAM() != positioner.GetStatus())
+  {
+    positioner.SetStatus(positioner.GetStatusFromSRAM());
+  }
+
+  /*pulse width log (optional)
+  if (positioner.GetPosState() == haltState)
+  {
+    //only for test
+    char str[40];
+    uint32_t in[256];
+    uint16_t _len[2];
+    if (positioner.read_cntrwidth(in, _len))
+    {
+      Poslog = "";
+      for (uint16_t i = 0; i < _len[0]; i++)
+      {
+        sprintf(str, "<br>%03d %u", i, in[i]);
+        Poslog += (String)str;
+      }
+      Poslog += "<br>------------------";
+    }
+    //only for test
+  }*/
+
+  //decode diseqc message.
+  if (diseqc.decode(&results))
+  {
+    char str[20];
+    sprintf(str, "%02X %02X %02X %06X ", results.framming, results.address, results.command, results.data);
+    Poslog = (String)str;
+
+    if ((results.framming == Master_First_transmission_No_reply ||
+         results.framming == Master_Repeated_First_transmission_No_reply) &&
+        (results.address == Any_Positioner ||
+         results.address == Polar_Azimuth_Positioner))
+    {
+      switch (results.command)
+      {
+      case Reset: //Reset DiSEqCä microcontroller
+        ESP.restart();
+        Poslog += "restart";
+        break;
+
+      case Clr_Reset: // Clear the “Reset” flag
+        positioner.ClearFlag();
+        Poslog += "ClearFlag";
+        break;
+
+      case Standby: // Stand by :Switch peripheral power supply off
+        //ESP.deepSleep(0); //deep sleep mode until RESET pin is connected to a LOW signal
+        Poslog += "Standby";
+        break;
+
+      case Power_on: // Power on :Switch peripheral power supply on
+        Poslog += "Poweron";
+        break;
+
+      case Halt: //Stop Positioner movement
+        positioner.StopMovement();
+        Poslog += "StopMovement";
+        break;
+
+      case Limits_Off: //Disable Limits
+        positioner.DisableLimits();
+        Poslog += "DisableLimits";
+        break;
+
+      case Limit_E: //Set East Limit (& Enable recommended)
+        positioner.SetEastLimit(positioner.GetStatusFromSRAM());
+        Poslog += "SetEastLimit";
+        positioner.EnableLimits();
+        break;
+
+      case Limit_W: //Set West Limit (& Enable recommended)
+        positioner.SetWestLimit(positioner.GetStatusFromSRAM());
+        Poslog += "SetWestLimit";
+        positioner.EnableLimits();
+        break;
+
+      case Drive_East: //Drive Motor East (with optional timeout/steps)
+        positioner.MoveToEast();
+        Poslog += "MoveToEast";
+        break;
+
+      case Drive_West: //Drive Motor West (with optional timeout/steps)
+        positioner.MoveToWest();
+        Poslog += "MoveToWest";
+        break;
+
+      case Store_nn: //Store Satellite Position & Enable Limits
+        if (results.data == 0)
+        {
+          positioner.EnableLimits();
+          Poslog += "EnableLimits";
+        }
+        else
+        {
+          uint16_t status = positioner.GetStatusFromSRAM();
+          positioner.StoreSatellite(results.data, status);
+          positioner.SetCurrentSat(results.data);
+          Poslog += "Store" + (String)results.data;
+        }
+        break;
+
+      case Goto_nn: //Drive Motor to Satellite Position nn
+        positioner.MoveToSatellite(results.data);
+        Poslog += "Goto" + (String)results.data;
+        break;
+
+      case Set_Posns: //(Re-) Calculate Satellite Positions
+        positioner.ReCalculatePositions(results.data);
+        Poslog += "ReCalculate" + (String)results.data;
+        break;
+
+      default:
+        Poslog += "NotSupportCMD";
+        break;
+      }
+    }
+
+    diseqc.resume();
+  }
+}
+
+String getContentType(String filename)
+{
+  if (filename.endsWith(".htm"))
+    return "text/html";
+  else if (filename.endsWith(".html"))
+    return "text/html";
+  else if (filename.endsWith(".css"))
+    return "text/css";
+  else if (filename.endsWith(".js"))
+    return "application/javascript";
+  else if (filename.endsWith(".png"))
+    return "image/png";
+  else if (filename.endsWith(".gif"))
+    return "image/gif";
+  else if (filename.endsWith(".jpg"))
+    return "image/jpeg";
+  else if (filename.endsWith(".ico"))
+    return "image/x-icon";
+  else if (filename.endsWith(".xml"))
+    return "text/xml";
+  else if (filename.endsWith(".pdf"))
+    return "application/x-pdf";
+  else if (filename.endsWith(".zip"))
+    return "application/x-zip";
+  else if (filename.endsWith(".gz"))
+    return "application/x-gzip";
+  return "text/plain";
+}
+
+bool handleFileRead(String path)
+{
+  // send the right file to the client (if it exists)
+  /*Serial.println("handleFileRead: " + path);
+  if (path.endsWith("/"))
+    path += "index.html"; // If a folder is requested, send the index file
+
+  String contentType = getContentType(path); // Get the MIME type
+  if (SPIFFS.exists(path))
+  {                                                     // If the file exists
+    File file = SPIFFS.open(path, "r");                 // Open it
+    size_t sent = server.streamFile(file, contentType); // And send it to the client
+    file.close();                                       // Then close the file again
+    return true;
+  }
+  Serial.println("\tFile Not Found");*/
+  return false; // If the file doesn't exist, return false
+}

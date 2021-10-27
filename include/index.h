@@ -1,0 +1,227 @@
+#ifndef INDEX_H_
+#define INDEX_H_
+
+#include <Arduino.h>
+#include <pgmspace.h>
+
+const char webpage[] PROGMEM =  R"=====(
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MOTOR SETTING</title>
+</head>
+<style type="text/css">
+    body {
+        color: #505050;
+        font-family: sahel, Sahel-FD, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 16px;
+        line-height: 24px;
+        font-weight: 300;
+    }
+
+    .log {
+        font-family: Monaco, Menlo, Consolas, "Courier New", monospace;
+        font-size: 13px;
+        line-height: 1.428571429;
+        color: #333;
+        word-break: normal;
+        word-wrap: normal;
+        background-color: #f5f5f5;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        max-height: 600px;
+        overflow-y: scroll;
+        overflow-x: scroll;
+        direction: ltr;
+        height: 180px;
+        padding-left: 12px;
+    }
+
+    .button {
+        background-color: #319fe9;
+        border: none;
+        color: white;
+        padding: 12px;
+        text-align: center;
+        text-decoration: none;
+        display: inline-block;
+        font-size: 16px;
+    }
+
+    .rightbtn {
+        border-radius: 0px 40px 40px 0px;
+    }
+
+    .leftbtn {
+        border-radius: 40px 0px 0px 40px;
+    }
+
+    .button:hover {
+        cursor: pointer;
+    }
+
+    .button:active {
+        border-width: 0;
+        outline: 0;
+    }
+
+    .button:focus {
+        border-width: 0;
+        outline: 0;
+    }
+
+    #MSG {
+        color: #e71d1d;
+        font-weight: 600;
+    }
+
+    #mainform {
+        width: 30%;
+    }
+
+    @media screen and (max-width:768px) {
+        #mainform {
+            width: 55%;
+        }
+    }
+
+    @media screen and (max-width:500px) {
+        #mainform {
+            width: 90%;
+        }
+    }
+</style>
+
+<body style="background-color: #ffffff ">
+    <div>
+        <div>
+            <a href="config">wifi config</a> |
+            <a href="update">update</a>
+        </div>
+        <center>
+            <div>
+                <div id="mainform" style="border: 1px solid #ccc;border-radius: 12px; 
+            padding: 12px; margin-top: 24px;">
+                    <h2>Motor Setup </h2>
+                    <hr>
+                    <button id="eastbtn" class="button leftbtn" onclick="send(1)">EAST</button>
+                    <button id="stopbtn" style="padding: 28px 16px;border-radius: 38px;" class="button"
+                        onclick="send(0)">STOP</button>
+                    <button id="westbtn" class="button rightbtn" onclick="send(2)">WEST</button>
+                    <hr>
+               
+
+                <div style="padding-top: 12px;">
+                    <span id="MSG"></span>
+                    <span id="STATUS" style="font-size: 50px;line-height: 50px;">?</span><br>
+                    CURRENT SAT: <span id="POS">?</span><br>
+                    WEST LIMIT: <span id="WEST">?</span><br>
+                    EAST LIMIT: <span id="EAST">?</span><br>
+                    LIMIT: <span id="LIMIT">?</span><br>
+                </div>
+                <div style="margin: 12px 12px;" class="log" id="LOG"></div>
+            </div>
+        </center>
+        
+    </div>
+
+    <script>
+
+        function send(CMD) {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function () {
+                if (this.readyState == 4 && this.status == 200) {
+                    var input = this.responseText;
+                    updatebtn(input);
+                }
+            };
+            xhttp.open("GET", "MOV?CMD=" + CMD, true);
+            xhttp.send();
+        }
+
+        setInterval(function () { getData(); }, 200);
+        function getData() {
+            var xhttp = new XMLHttpRequest();
+            xhttp.onreadystatechange = function () {
+                if (this.readyState == 4 && this.status == 200) {
+                    var input = this.responseText.split('`');
+
+                    var tim = new Date();
+
+                    document.getElementById("STATUS").innerHTML = input[0];
+
+                    if (input[1] != "0") {
+                        var d = new Date();
+                        if (document.getElementById("LOG").getElementsByTagName("br").length > 50) {
+                            document.getElementById("LOG").innerHTML =
+                                document.getElementById("LOG").innerHTML.slice(
+                                    document.getElementById("LOG").innerHTML.indexOf("br") + 3,
+                                    document.getElementById("LOG").innerHTML.length);
+                        }
+                        document.getElementById("LOG").innerHTML += input[1]
+                            /*+ " " + d.toLocaleTimeString() */ + "<br>";
+                        document.getElementById("LOG").scrollBy(0, 50);
+                    }
+
+                    document.getElementById("POS").innerHTML = input[2];
+                    document.getElementById("WEST").innerHTML = input[3];
+                    document.getElementById("EAST").innerHTML = input[4];
+                    document.getElementById("LIMIT").innerHTML = input[5];
+
+                    if (input[6] != 0) {
+                        var msg = "";
+                        if (input[6] == 1)
+                            msg = "Check sensor connector or reach hardware limit";
+
+                        document.getElementById("MSG").innerHTML = msg + "<br>";
+                    }
+                    else
+                        document.getElementById("MSG").innerHTML = "";
+
+
+                    if (input[7] == 8)
+                        updatebtn("EAST");
+                    else if (input[7] == 9)
+                        updatebtn("WEST");
+                    else if (input[7] == 10)
+                        updatebtn("HALT");
+                }
+            };
+            xhttp.open("GET", "GET_STATUS", true);
+            xhttp.send();
+        }
+
+        function updatebtn(inp) {
+            if (inp == "WEST") {
+                document.getElementById("westbtn").style.background = "#57cc5d";
+                document.getElementById("westbtn").style.borderWidth = "0";
+                document.getElementById("stopbtn").style.background = "#319fe9";
+                document.getElementById("eastbtn").style.background = "#319fe9";
+            }
+            else if (inp == "EAST") {
+                document.getElementById("eastbtn").style.background = "#57cc5d";
+                document.getElementById("eastbtn").style.borderWidth = "0";
+                document.getElementById("stopbtn").style.background = "#319fe9";
+                document.getElementById("westbtn").style.background = "#319fe9";
+            }
+            else if (inp == "HALT") {
+                document.getElementById("stopbtn").style.background = "#57cc5d";
+                document.getElementById("stopbtn").style.borderWidth = "0";
+                document.getElementById("eastbtn").style.background = "#319fe9";
+                document.getElementById("westbtn").style.background = "#319fe9";
+            }
+
+        }
+
+    </script>
+
+</body>
+
+</html>
+)=====";
+
+#endif

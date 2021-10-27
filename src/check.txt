@@ -1,0 +1,335 @@
+
+ /*
+    if ((results.framming == Master_First_transmission_No_reply ||
+         results.framming == Master_Repeated_First_transmission_No_reply ||
+         results.framming == Master_First_transmission_Reply_required ||
+         results.framming == Master_Repeated_First_transmission_Reply_required) &&
+        (results.address == Any_Positioner ||
+         results.address == Polar_Azimuth_Positioner ||
+         results.address == Elevation_Positioner))
+    {
+      switch (results.command)
+      {
+      case Reset: //Reset DiSEqCä microcontroller
+        ESP.restart();
+        break;
+
+      case Clr_Reset: // Clear the “Reset” flag
+        satpositioner.ClearFlag();
+        break;
+
+      case Standby: // Stand by :Switch peripheral power supply off
+        //set_sleep_mode(SLEEP_MODE_STANDBY);
+        //break;
+
+      case Power_on: // Power on :Switch peripheral power supply on
+        //break;
+
+      case Halt: //Stop Positioner movement
+        satpositioner.StopMovement();
+        break;
+
+      case Limits_Off: //Disable Limits
+        satpositioner.DisableLimits();
+        break;
+
+      case Limit_E: //Set East Limit (& Enable recommended)
+        satpositioner.SetEastLimit();
+        break;
+
+      case Limit_W: //Set West Limit (& Enable recommended)
+        satpositioner.SetWestLimit();
+        break;
+
+      case Drive_East: //Drive Motor East (with optional timeout/steps)
+        satpositioner.MoveToEast();
+        break;
+
+      case Drive_West: //Drive Motor West (with optional timeout/steps)
+        satpositioner.MoveToWest();
+        break;
+
+      case Store_nn: //Store Satellite Position & Enable Limits
+        if (results.data == 0)
+          satpositioner.EnableLimits();
+        else
+          satpositioner.StoreSatellite(results.data);
+        break;
+
+      case Goto_nn: //Drive Motor to Satellite Position nn
+        satpositioner.MoveToSatellite(results.data);
+        break;
+
+      case Set_Posns: //(Re-) Calculate Satellite Positions
+        satpositioner.ReCalculatePositions(results.data);
+        break;
+
+      default:
+        break;
+      }
+    }
+
+*/
+
+
+
+
+
+/**********************/
+/**********************/
+/** for Diseqc class **/
+/**********************/
+/**********************/
+
+
+/// Information for the interrupt handler
+typedef struct {
+  uint8_t recvpin;   // pin for IR data from detector
+  uint8_t rcvstate;  // state machine
+  uint16_t timer;    // state timer, counts 50uS ticks.
+  uint16_t bufsize;  // max. nr. of entries in the capture buffer.
+  uint16_t *rawbuf;  // raw data
+  // uint16_t is used for rawlen as it saves 3 bytes of iram in the interrupt
+  // handler. Don't ask why, I don't know. It just does.
+  uint16_t rawlen;   // counter of entries in rawbuf.
+  uint8_t overflow;  // Buffer overflow indicator.
+  uint8_t timeout;   // Nr. of milliSeconds before we give up.
+} irparams_t;
+
+static ETSTimer timer;
+volatile irparams_t irparams;
+
+#define ONCE  0
+// receiver states
+const uint8_t kIdleState = 2;
+const uint8_t kStopState = 5;
+const uint8_t kMarkState = 3;
+const uint16_t kRawTick = 2;   
+const uint16_t kStateSizeMax = 53;
+const uint16_t kStartOffset = 1;   // Usual rawbuf entry to start from.
+const uint16_t kRawBuf = 100;  // Default length of raw capture buffer
+
+enum decode_type_t {
+  UNKNOWN = -1,
+  UNUSED = 0
+  };
+  
+class decode_results {
+ public:
+  decode_type_t decode_type;  // NEC, SONY, RC5, UNKNOWN
+  // value, address, & command are all mutually exclusive with state.
+  // i.e. They MUST NOT be used at the same time as state, so we can use a union
+  // structure to save us a handful of valuable bytes of memory.
+  union {
+    struct {
+      uint64_t value;    // Decoded value
+      uint32_t address;  // Decoded device address.
+      uint32_t command;  // Decoded command.
+    };
+    uint8_t state[kStateSizeMax];  // Multi-byte results.
+  };
+  uint16_t bits;              // Number of bits in decoded value
+  volatile uint16_t *rawbuf;  // Raw intervals in .5 us ticks
+  uint16_t rawlen;            // Number of records in rawbuf.
+  bool overflow;
+  bool repeat;  // Is the result a repeat code?
+};
+
+irparams_t *irparams_save;
+
+const uint16_t kStartOffset = 1;   // Usual rawbuf entry to start from.
+#define MS_TO_USEC(x) (x * 1000U)  // Convert milli-Seconds to micro-Seconds.
+#define USE_IRAM_ATTR ICACHE_RAM_ATTR
+
+const uint8_t kTimeoutMs = 15;  // In MilliSeconds.
+#define TIMEOUT_MS kTimeoutMs   // For legacy documentation.
+const uint16_t kMaxTimeoutMs = kRawTick * (UINT16_MAX / MS_TO_USEC(1));
+const uint16_t bufsize = kRawBuf;
+const uint8_t timeout = kTimeoutMs;
+const bool save_buffer = false;
+
+
+bool decode(decode_results *results, irparams_t *save = NULL,
+              uint8_t max_skip = 0, uint16_t noise_floor = 0);
+void enableIRIn(const bool pullup = false);
+void disableIRIn(void);
+void resume(void);
+
+
+bool decode(decode_results *results, irparams_t *save,
+                    uint8_t max_skip, uint16_t noise_floor) {
+
+ irparams.rawbuf[irparams.rawlen] = 0;
+
+  bool resumed = false;  // Flag indicating if we have resumed.
+
+    // If we were requested to use a save buffer previously, do so.
+  if (save == NULL) 
+    save = irparams_save;
+   else
+   {
+    copyIrParams(&irparams, save);  // Duplicate the interrupt's memory. مموری اینتراپت کپی شود
+    resume();  // It's now safe to rearm. The IR message won't be overridden.
+    resumed = true;
+    // Point the results at the saved copy.
+    results->rawbuf = save->rawbuf;
+    results->rawlen = save->rawlen;
+    results->overflow = save->overflow;
+  }
+
+    // Reset any previously partially processed results.
+  results->decode_type = UNKNOWN;
+  results->bits = 0;
+  results->value = 0;
+  results->address = 0;
+  results->command = 0;
+  results->repeat = false;
+
+  // Keep looking for protocols until we've run out of entries to skip or we
+  // find a valid protocol message.
+  for (uint16_t offset = kStartOffset;
+       offset <= (max_skip * 2) + kStartOffset;
+       offset += 2) {
+      if (decodeDiseqc(results, offset)) return true;
+       }
+  // Throw away and start over
+  if (!resumed)  // Check if we have already resumed.
+    resume();
+  return false;
+}
+
+bool decodeDiseqc(decode_results *results, uint16_t offset) {
+    return 0;                     
+ }
+
+void copyIrParams(volatile irparams_t *src, irparams_t *dst) {
+  // Typecast src and dst addresses to (char *)
+  char *csrc = (char *)src;  // NOLINT(readability/casting)
+  char *cdst = (char *)dst;  // NOLINT(readability/casting)
+
+  // Save the pointer to the destination's rawbuf so we don't lose it as
+  // the for-loop/copy after this will overwrite it with src's rawbuf pointer.
+  // This isn't immediately obvious due to typecasting/different variable names.
+  uint16_t *dst_rawbuf_ptr;
+  dst_rawbuf_ptr = dst->rawbuf;
+
+  // Copy contents of src[] to dst[]
+  for (uint16_t i = 0; i < sizeof(irparams_t); i++) cdst[i] = csrc[i];
+
+  // Restore the buffer pointer
+  dst->rawbuf = dst_rawbuf_ptr;
+
+  // Copy the rawbuf
+  for (uint16_t i = 0; i < dst->bufsize; i++) dst->rawbuf[i] = src->rawbuf[i];
+}
+
+void resume(void) {
+  irparams.rcvstate = kIdleState;
+  irparams.rawlen = 0;
+  irparams.overflow = false;
+  }
+
+void enableDiseqcIn(const bool pullup=false) {
+  pinMode(irparams.recvpin, INPUT);
+
+  // Initialize state machine variables
+  resume();
+
+  // Initialize ESP8266 timer.
+  os_timer_disarm(&timer);
+  os_timer_setfn(&timer, reinterpret_cast<os_timer_func_t *>(read_timeout),NULL);
+                 
+  // Attach Interrupt
+  attachInterrupt(irparams.recvpin, gpio_intr, CHANGE);
+}
+
+void disableIRIn(void) {
+  os_timer_disarm(&timer);
+
+  detachInterrupt(irparams.recvpin);
+}
+
+// به کمک آن می توان فهمید گرفتن داده تمام شده است
+static void USE_IRAM_ATTR read_timeout(void *arg __attribute__((unused))) {
+  os_intr_lock();
+  // اگر طول داده صفر نبود
+  //rcvstate
+  //برابر با 
+  //kStopState
+  //شود
+ if (irparams.rawlen) irparams.rcvstate = kStopState;
+  os_intr_unlock();
+}
+
+void gpio_intr (){
+  uint32_t now = micros();
+  static uint32_t start = 0;
+
+//Interrupt clearing register in esp8266
+/*
+// Include API-Headers
+extern "C" {
+#include "ets_sys.h"
+#include "os_type.h"
+#include "osapi.h"
+#include "mem.h"
+#include "user_interface.h"
+#include "cont.h"
+}
+unsigned long gpio_status;
+
+//Clear GPIO Interrupt Status
+gpio_status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
+GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, gpio_status);
+*/
+// پاک کردن رجیستر اینتراپت
+  uint32_t gpio_status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
+  os_timer_disarm(&timer);
+  GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, gpio_status);
+
+// ابتدا طول کنونی داده را در متغیر 
+//rawlen 
+//ریخته
+  uint16_t rawlen = irparams.rawlen;
+
+//اگر بیشتر از اندازه بافر بود 
+//rcvstate مساوی kStopState 
+//شود
+  if (rawlen >= irparams.bufsize) {
+    irparams.overflow = true;
+    irparams.rcvstate = kStopState;
+  }
+// اگر متغیر 
+//kStopState == rcvstate 
+//بود از اینتراپت خارج شود
+  if (irparams.rcvstate == kStopState) return;
+
+//اگر 
+//rcvstate 
+//برابر با
+//Idle
+//بود 
+//rcvstate
+//برابر با 
+// Mark 
+//شود و بنابراین طول داده برابر با یک شود
+  if (irparams.rcvstate == kIdleState) {
+    irparams.rcvstate = kMarkState;
+    irparams.rawbuf[rawlen] = 1;
+  } 
+  //اگر نه (عرض پالس به میکرو در
+  // بافر 
+  //rawbuf[rawlen] 
+  //ذخیره می شود
+  else {
+    if (now < start)
+      irparams.rawbuf[rawlen] = (UINT32_MAX - start + now) / kRawTick;
+    else
+      irparams.rawbuf[rawlen] = (now - start) / kRawTick;
+  }
+  irparams.rawlen++;
+
+  start = now;
+
+  os_timer_arm(&timer, irparams.timeout, ONCE);
+}
