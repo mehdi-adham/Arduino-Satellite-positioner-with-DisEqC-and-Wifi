@@ -108,5 +108,8 @@ Now, go to the settings of Motor DiSEqC with the remote control of the receiver 
 
 Here are three videos on how to connect the positioner to the dish motor and receiver and test with Wi-Fi and remote control.
 https://youtu.be/7OuzMqFP5-o
+
 https://youtu.be/bW-LMHPvRvs
+
 https://youtu.be/6norc0-4YZ8
+
