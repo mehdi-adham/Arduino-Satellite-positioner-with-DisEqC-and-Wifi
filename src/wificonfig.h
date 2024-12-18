@@ -14,31 +14,18 @@
 
 //type's
 
-//Access Point parameter's
-typedef struct
-{
-    const char *SSID;
-    const char *PSK;
-} APParams;
-
-//web server parameter's
-typedef struct
-{
-    const char *username;
-    const char *password;
-} wsParams;
-
 typedef struct
 {
     String factory_SSID;
     String factory_PSK;
     String factory_username;
     String factory_password;
+    uint8_t factory_is_ap;
 } factory_values;
 
 //Function's
-void writeString(char add, String data, uint8_t max_len = 32);
-String read_String(char add, uint8_t max_len = 32);
+void read_data(int address, String &data, uint8_t max_len = 14);
+void write_data(int address, String &data, uint8_t max_len = 14);
 
 //class's
 
@@ -47,22 +34,22 @@ class wificonfig
 {
 public:
     explicit wificonfig(String APSSID = "Positioner", String APPSK = "12345678",
-                        String ws_username = "admin", String ws_password = "admin"); // Constructor
+                        String ws_username = "admin", String ws_password = "admin",
+                         uint8_t is_ap = 1); // Constructor
 
     ~wificonfig(void); // Destructor
-
-    bool Change_AP_params(APParams *APParams);
-    bool Change_ws_params(wsParams *wsParams);
-    void Get_AP_params(APParams *APParams);
-    void Get_ws_params(wsParams *wsParams);
-    void RESET();
     void Get_SSID(String &input);
     void Get_PSK(String &input);
     void Get_USERNAMME(String &input);
     void Get_PASSWORD(String &input);
+    void Get_IS_AP(uint8_t &input);
+
     bool Set_SSID(String &input);
     bool Set_PSK(String &input);
     bool Set_USERNAMME(String &input);
     bool Set_PASSWORD(String &input);
+    bool Set_IS_AP(uint8_t &input);
+
+    void RESET();
 };
 #endif

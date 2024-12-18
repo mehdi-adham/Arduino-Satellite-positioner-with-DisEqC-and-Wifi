@@ -63,18 +63,24 @@ const char wifiConfigPage[] PROGMEM =  R"=====(
         box-sizing: border-box;
     }
 
-    #configform {
+    .formdiv {
+        text-align: left;
+        border: 1px solid #ccc;
+        border-radius: 12px;
+        padding: 12px;
+        margin-top: 24px;
         width: 30%;
     }
 
     @media screen and (max-width:768px) {
-        #configform {
+
+        .formdiv {
             width: 55%;
         }
     }
 
     @media screen and (max-width:500px) {
-        #configform {
+        .formdiv {
             width: 90%;
         }
     }
@@ -87,22 +93,38 @@ const char wifiConfigPage[] PROGMEM =  R"=====(
         </div>
         <center>
             <div>
-                <div id="configform" style="text-align: left; border: 1px solid #ccc;border-radius: 12px; 
-            padding: 12px; margin-top: 24px;">
-                    <h2>Configuration </h2>
-                        <hr>
-                        <h3>Access Point Config</h3>
-                        <b> ssid:</b> <BR>
-                        <input type="text" name="ssid" placeholder="Positioner"><BR>
-                        <b> psk:</b> <BR>
-                        <input type="password" name="psk" placeholder="12345678"><BR>
-                        <br>
-                        <h3>Web Server Config</h3>
-                        <b> username:</b> <BR>
-                        <input type="text" name="username" placeholder="admin"><BR>
-                        <b> password:</b> <BR>
-                        <input type="password" name="password" placeholder="admin"><BR>
-                        <button style="margin-top:24px;" type="submit" class="button">Change</button><BR>
+                <div class="formdiv">
+                    <h2>Add Network </h2>
+
+                    <b> Network name:</b> <BR>
+                    <input id="netname" type="text" name="netname" placeholder="Enter network name" maxlength="14"
+                        minlength="4"><BR>
+
+                    <b> password:</b> <BR>
+                    <input id="netpassword" type="password" name="netpassword" placeholder="Enter password"
+                        maxlength="14" minlength="8"><BR>
+                    <div id="netmsg"></div>
+                    <button id="netbtn" style="margin-top:24px;" type="button" class="button">Connect</button><BR>
+                </div>
+
+                <div class="formdiv">
+                    <h2> Access Point </h2>
+
+                    <b> ssid:</b> <BR>
+                    <input type="text" name="ssid" placeholder="Positioner" maxlength="14" minlength="4"><BR>
+                    <b> psk:</b> <BR>
+                    <input type="password" name="psk" placeholder="12345678" maxlength="14" minlength="8"><BR>
+                    <button style="margin-top:24px;" type="submit" class="button">Change</button><BR>
+
+                </div>
+
+                <div class="formdiv">
+                    <h2>Login parameter</h2>
+                    <b> username:</b> <BR>
+                    <input type="text" name="username" placeholder="admin" maxlength="14" minlength="4"><BR>
+                    <b> password:</b> <BR>
+                    <input type="password" name="password" placeholder="admin" maxlength="14" minlength="4"><BR>
+                    <button style="margin-top:24px;" type="submit" class="button">Change</button><BR>
 
                 </div>
             </div>
@@ -110,6 +132,39 @@ const char wifiConfigPage[] PROGMEM =  R"=====(
         </center>
     </form>
 </body>
+<script>
+    const Enetname = document.getElementById("netname");
+    const Enetpassword = document.getElementById("netpassword");
+    const Enetmsg = document.getElementById("netmsg");
+    const Enetbtn = document.getElementById("netbtn");
+
+    Enetbtn.addEventListener("click", F_netbtn);
+
+    function F_netbtn() {
+        var xhttp = new XMLHttpRequest();
+        xhttp.timeout = 30000;
+        xhttp.onreadystatechange = function () {
+            if (this.readyState == 4 && this.status == 200) {
+                const data = xhttp.responseText;
+                if (data == "1") {
+                    Enetmsg.innerText = "Successfull! Now, Using your phone, connect to new network. then Using your phone browser, enter ip address URL: 192.168.1.184 ";
+                    Enetmsg.style.color = "Green";
+                }
+                else if (data == "0") {
+                    Enetmsg.innerText = "Not find! Try again.";
+                    Enetmsg.style.color = "Red";
+                } else {
+                    Enetmsg.innerText = "Invalid input, Try again.";
+                    Enetmsg.style.color = "Red";
+                }
+            }
+        };
+        Enetmsg.innerText ="wait for connection...";
+        Enetmsg.style.color = "gray";
+        xhttp.open("GET", "F_addnet?netname=" + Enetname.value + "&netpassword=" + Enetpassword.value, true);
+        xhttp.send();
+    }
+</script>
 
 </html>
 )=====";
